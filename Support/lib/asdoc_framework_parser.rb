@@ -1,9 +1,11 @@
 #!/usr/bin/env ruby -wKU
 # encoding: utf-8
 
-require "rexml/document"
 require "#{ENV['TM_SUPPORT_PATH']}/lib/escape"
 require "#{ENV['TM_BUNDLE_SUPPORT']}/lib/asdoc_tidy"
+
+require 'rubygems'
+require 'nokogiri'
 
 # Deserialises the asdoc generated all-classes.html file into a object that is
 # then serialized into a TextMate Bundle. Children are handled by the 
@@ -11,8 +13,8 @@ require "#{ENV['TM_BUNDLE_SUPPORT']}/lib/asdoc_tidy"
 #
 class AsdocFrameworkParser
 
-  LINK_X_PATH = "html/body/table/tr/td/a"
-  NAME_X_PATH = "html/head/title"
+  LINK_X_PATH = "//html/body/div/a"
+  NAME_X_PATH = "//html/head/title"
 
   private
 
@@ -38,24 +40,30 @@ class AsdocFrameworkParser
     # Load the all-classes.html document and create
     # a list of it's contents.
     def load_framework all_classes_html
-
+      
       @base_uri = File.dirname all_classes_html
-
-      html = AsdocTidy.clean_for_rexml(all_classes_html)
-
-      class_doc = REXML::Document.new html
-
+      
+      f = File.open(all_classes_html)
+      class_doc = Nokogiri::HTML(f)
+      
       # TODO: Class path level filtering.
-      class_doc.elements.each( LINK_X_PATH ) do |tag|
-        class_href = tag.attributes['href'].to_s
+      class_doc.xpath(LINK_X_PATH).each() do |tag|
+        class_href = tag.get_attribute('title').to_s
+        
         if class_href =~ @package_filter
-          @class_path_list.push( @base_uri+"/"+class_href )
-          @doc_path_list.push( tag.to_s.gsub( /\<\/?i\>/, '' ) )
-          log( "Adding Class " + File.basename( class_href ) )
+          class_href = class_href.gsub(".", "/")
+          file_path = @base_uri+"/" + class_href + ".html"
+          
+          @class_path_list.push( file_path )
+          # remove whitspace
+          class_name = tag.text.strip
+          class_name.gsub!("\302\240", '')
+          doc_tag = "<a href='#{class_href}.html'>#{class_name}</a>"
+          @doc_path_list.push( doc_tag )
         end
       end
 
-      class_doc.elements.each( NAME_X_PATH ) do |tag|
+      class_doc.xpath(NAME_X_PATH).each() do |tag|
         begin
           # All Classes - ActionScript 3.0 Language and Components Reference
           # All Classes \- \b(\w+)\b API Documentation
@@ -96,7 +104,7 @@ class AsdocFrameworkParser
     def log( message )
       if @logging_enabled
         require 'syslog'
-
+        
         Syslog.open('as3-bundle-gen')
         Syslog.crit(message)
         Syslog.close()

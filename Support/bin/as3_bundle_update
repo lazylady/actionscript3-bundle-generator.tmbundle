@@ -1,9 +1,16 @@
 #!/usr/bin/env ruby -wKU
 
 require ENV['TM_SUPPORT_PATH']+'/lib/textmate'
+
+=begin
+  TODO Only temporary, set during development test
+=end
+ENV['TM_BUNDLE_SUPPORT'] = "/Users/lazylady/Library/Application Support/Avian/Bundles/actionscript3-bundle-generator.tmbundle/Support" 
+
 require ENV['TM_BUNDLE_SUPPORT']+'/lib/asdoc_class_parser'
 require ENV['TM_BUNDLE_SUPPORT']+'/lib/asdoc_framework_parser'
 require ENV['TM_BUNDLE_SUPPORT']+'/lib/list_to_regexp'
+
 
 # ============
 # = Settings =
@@ -11,18 +18,18 @@ require ENV['TM_BUNDLE_SUPPORT']+'/lib/list_to_regexp'
 
 @log = false;
 
-user = ENV['USER'] || 'simon'
+user = ENV['USER'] || 'lazylady'
 
-BUNDLE_PATH = "/Users/#{user}/Library/Application Support/TextMate/Bundles/ActionScript 3.tmbundle"
+# Might be just temporary as 'Avian' only is before 1.0?
+BUNDLE_PATH = "/Users/#{user}/Library/Application Support/Avian/Bundles/ActionScript 3.tmbundle"
 GRAMMAR_PATH = BUNDLE_PATH + '/Syntaxes/ActionScript 3.tmLanguage'
-
-FLASH_PATH = '/Library/Application Support/Adobe/Help/en_US/AS3LCR/Flash_10.0/all-classes.html'
-FLEX_PATH = '/Developer/SDKs/flex_sdk_4.0.0/asdoc-output/all-classes.html'
+FLEX_PATH = ENV['TM_FLEX_PATH'] + "/docs/langref/all-classes.html"
 
 TEMP_OUTPUT = "/Users/#{user}/Desktop/as3_bundle_generator_temp"
 
-unless File.exist?(FLASH_PATH) and File.exist?(FLEX_PATH) and File.exist?(BUNDLE_PATH)
-    TextMate.exit_show_tool_tip "Failed to find required files."
+# unless FileFile.exist?(FLASH_PATH) and File.exist?(FLEX_PATH) and File.exist?(BUNDLE_PATH)
+unless File.exist?(FLEX_PATH) and File.exist?(BUNDLE_PATH)
+    TextMate.exit_show_tool_tip "Failed to find required files, FLEX_PATH : #{FLEX_PATH}, BUNDLE_PATH #{File.exist?(FLEX_PATH).to_s}: #{BUNDLE_PATH}" 
 end
 
 # =================================
@@ -37,6 +44,7 @@ def create_cp(id,filter,path)
   fp.load_framework path
 
   cp = AsdocClassParser.new
+  cp.base_path = File.dirname path
   cp.id = id
   cp.logging_enabled = @log
   cp.framework = fp.framework_name
@@ -45,19 +53,38 @@ def create_cp(id,filter,path)
   cp 
 end
 
-t  = create_cp('top-level', /^\.\//,FLASH_PATH)
-f  = create_cp('flash', /^flash/, FLASH_PATH)
-fl = create_cp('fl', /^fl\//, FLASH_PATH)
-fx = create_cp('flashx', /^flashx\//, FLEX_PATH)
-mx = create_cp('mx', /^mx\//, FLEX_PATH)
-sp = create_cp('spark', /^spark\//, FLEX_PATH)
-os = create_cp('osmf', /^org\/osmf/, FLEX_PATH)
+# t  = create_cp('top-level', /^\.\//,FLASH_PATH)
+# f  = create_cp('flash', /^flash/, FLASH_PATH)
+# fl = create_cp('fl', /^fl\//, FLASH_PATH)
 
-libs = [t,f,fl,fx,mx,sp,os]
+# Top Level
+t  = create_cp('top-level', /^[A-Z]/, FLEX_PATH)
+# Flash Core Lib
+f  = create_cp('flash', /^flash\./, FLEX_PATH)
+
+# TLF - Text Layout Framework
+fx = create_cp('flashx', /^flashx\./, FLEX_PATH)
+
+# DISABLED LIBS
+# Flash Component Lib
+# fl = create_cp('fl', /^fl\./, FLEX_PATH)
+# mx = create_cp('mx', /^mx\./, FLEX_PATH) - DISABLED
+# Spark flex components - Not interesting - DISABLED
+# sp = create_cp('spark', /^spark\./, FLEX_PATH)
+# Adobe Open Source Media Framework http://www.osmf.org/ - Big and clumpsy - DISABLED
+# os = create_cp('osmf', /^org\.osmf/, FLEX_PATH)
+
+# puts "f len : #{f.class_names.count}"
+# puts "fl len : #{fl.class_names.count}"
+# exit
+
+# libs = [t,f,fl,fx,mx,sp,os]
+libs = [t,f,fx]
 
 # collect docs info from flex docs.
 dp = AsdocFrameworkParser.new
 dp.logging_enabled = @log
+dp.package_filter = /^([A-Z]|flash\.|flashx\.)/
 dp.load_framework FLEX_PATH
 
 # ===========
@@ -80,6 +107,8 @@ if @log
   	Dir.mkdir(path)
   end
 
+  # puts "method names : " + f.method_names.to_s
+
   to_file( path+"/constant_names.txt", f.constant_names.join("\n"))
   to_file( path+"/method_names.txt",   f.method_names.join("\n") )
   to_file( path+"/property_names.txt", f.property_names.join("\n"))
@@ -87,10 +116,9 @@ if @log
   to_file( path+"/constant_names_comp.txt", ListToRegexp.process_list(f.constant_names))
   to_file( path+"/method_names_comp.txt",   ListToRegexp.process_list(f.method_names) )
   to_file( path+"/property_names_comp.txt", ListToRegexp.process_list(f.property_names))
-
+  
+  exit
 end
-
-exit
 
 # =========================
 # = Grammar Load and Save =
@@ -120,11 +148,13 @@ end
 
 def add_support_classes(parser)
   patterns = []
+  # puts "parser : class_names #{parser.class_names.to_s}"
   patterns << pattern_for( "support.class.#{parser.id}.actionscript.3", parser.class_names )
   @grammar['repository']['support-classes-'+parser.id] = { 'patterns' => patterns }
 end
 
 libs.each { |lib|
+  # puts "lib class names len : #{lib.class_names.count}"
   add_support_classes(lib)
   add_framework(lib)
 }
@@ -134,12 +164,17 @@ File.open(GRAMMAR_PATH, "w") do |file|
 end
 
 # =========================
-# = AutoCompletion Outupt =
+# = AutoCompletion Output =
 # =========================
 
 all_completions = []
-libs.each { |lib| all_completions + lib.method_completions  }
-all_completions = all_completions.uniq.sort
+libs.each { |lib|
+  all_completions << lib.method_completions
+}
+all_completions.flatten!
+all_completions.sort!
+all_completions.uniq!
+puts "completions count : #{all_completions.count.to_s}"
 
 method_completions = File.open( BUNDLE_PATH+"/Support/data/completions.txt", 
                                 File::WRONLY|File::TRUNC|File::CREAT )
@@ -162,3 +197,8 @@ doc_dictionary.puts "</dict>"
 # `osascript -e 'tell app "TextMate" to reload bundles'`
 
 print "Complete."
+
+
+# if __FILE__ == $0
+#   
+# end
